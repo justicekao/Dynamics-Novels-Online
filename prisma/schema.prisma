@@ -1,0 +1,495 @@
+// Dynamics Novels Online — data model
+// Many-to-many and "pick from a list" relationships that the world builder UI
+// exposes as dropdowns/checkbox-lists are stored as JSON arrays of ids rather
+// than join tables. This keeps the schema tractable while the UI layer still
+// guarantees users only ever pick from existing entities (never type ids).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ---------- Accounts ----------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  bio          String   @default("")
+  avatarSeed   String
+  createdAt    DateTime @default(now())
+
+  sessions  Session[]
+  worlds    World[]        @relation("WorldOwner")
+  ratings   Rating[]
+  comments  Comment[]
+  favorites Favorite[]
+  friendsA  Friendship[]   @relation("FriendshipA")
+  friendsB  Friendship[]   @relation("FriendshipB")
+  blocks    Block[]        @relation("BlockingUser")
+  blockedBy Block[]        @relation("BlockedUser")
+  characters Character[]
+  collaborations WorldCollaborator[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Friendship {
+  id        String   @id @default(cuid())
+  userAId   String
+  userA     User     @relation("FriendshipA", fields: [userAId], references: [id], onDelete: Cascade)
+  userBId   String
+  userB     User     @relation("FriendshipB", fields: [userBId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userAId, userBId])
+}
+
+model Block {
+  id            String   @id @default(cuid())
+  blockingId    String
+  blocking      User     @relation("BlockingUser", fields: [blockingId], references: [id], onDelete: Cascade)
+  blockedId     String
+  blocked       User     @relation("BlockedUser", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@unique([blockingId, blockedId])
+}
+
+// ---------- Tags ----------
+
+model Tag {
+  id    String @id @default(cuid())
+  name  String @unique
+  worlds WorldTag[]
+}
+
+model WorldTag {
+  worldId String
+  world   World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  tagId   String
+  tag     Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([worldId, tagId])
+}
+
+// ---------- World ----------
+
+model World {
+  id          String   @id @default(cuid())
+  ownerId     String
+  owner       User     @relation("WorldOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  description String   @default("")
+  slug        String   @unique
+
+  visibility        String   @default("PRIVATE") // PRIVATE | PUBLIC
+  allowComments     Boolean  @default(true)
+  allowRatings      Boolean  @default(true)
+  allowDuplication  Boolean  @default(true)
+  isDefault         Boolean  @default(false)
+
+  // JSON: { timeUnit, timeUnitPlural, dungeon, hunt, tavern, inn, race, class,
+  //         npc, companion, location, skill, item, creature }
+  terminology String @default("{}")
+
+  forkedFromId String?
+  forkedFrom   World?  @relation("WorldForks", fields: [forkedFromId], references: [id], onDelete: SetNull)
+  forks        World[] @relation("WorldForks")
+
+  visitCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tags          WorldTag[]
+  ratings       Rating[]
+  comments      Comment[]
+  favorites     Favorite[]
+  visits        WorldVisit[]
+  collaborators WorldCollaborator[]
+
+  races      Race[]
+  classes    Class[]
+  skills     Skill[]
+  traits     Trait[]
+  items      Item[]
+  effects    EffectDefinition[]
+  locations  Location[]
+  roads      LocationConnection[]
+  npcs       Npc[]
+  companions Companion[]
+  interactions Interaction[]
+  creatures  Creature[]
+  dungeons   Dungeon[]
+  events     Event[]
+  characters Character[]
+}
+
+model WorldCollaborator {
+  id      String @id @default(cuid())
+  worldId String
+  world   World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isAdmin Boolean @default(false)
+
+  @@unique([worldId, userId])
+}
+
+model WorldVisit {
+  id        String   @id @default(cuid())
+  worldId   String
+  world     World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  userId    String?
+  createdAt DateTime @default(now())
+}
+
+model Rating {
+  id        String   @id @default(cuid())
+  worldId   String
+  world     World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value     Int
+  createdAt DateTime @default(now())
+
+  @@unique([worldId, userId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  worldId   String
+  world     World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime @default(now())
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  worldId   String
+  world     World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([worldId, userId])
+}
+
+// ---------- World-building entities ----------
+// statModifiers / effects / conditions / successStats are JSON blobs edited
+// exclusively through dropdown-driven forms in the UI.
+
+model Race {
+  id            String @id @default(cuid())
+  worldId       String
+  world         World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name          String
+  description   String @default("")
+  portraitSeed  String @default("")
+  statModifiers String @default("{}")
+  traitIds      String @default("[]")
+}
+
+model Class {
+  id                String @id @default(cuid())
+  worldId           String
+  world             World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name              String
+  description       String @default("")
+  statModifiers     String @default("{}")
+  startingSkillIds  String @default("[]")
+}
+
+model Trait {
+  id            String @id @default(cuid())
+  worldId       String
+  world         World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name          String
+  description   String @default("")
+  statModifiers String @default("{}")
+}
+
+model EffectDefinition {
+  id          String @id @default(cuid())
+  worldId     String
+  world       World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name        String
+  description String @default("")
+  kind        String // STAT_MODIFIER | STATUS | DAMAGE | HEAL | GRANT_TRAIT | ELEMENTAL
+  // JSON payload shape depends on kind, e.g. { stat, amount, duration, element, chance }
+  payload     String @default("{}")
+
+  usedBySkills SkillEffect[]
+  usedByItems  ItemEffect[]
+}
+
+model Skill {
+  id                  String @id @default(cuid())
+  worldId             String
+  world               World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name                String
+  description         String @default("")
+  type                String @default("ACTIVE") // ACTIVE | PASSIVE
+  element             String @default("")
+  targetType          String @default("SINGLE_ENEMY") // SELF | SINGLE_ENEMY | ALL_ENEMIES | SINGLE_ALLY | ALL_ALLIES
+  basePower           Int    @default(0)
+  baseSuccessChance    Int    @default(100)
+  grantsTraitId        String @default("")
+  grantsTraitChance    Int    @default(0)
+  requiresTraitId      String @default("")
+  // JSON list of unlock conditions: [{type:"HAS_ITEM"|"COMPLETED_EVENT"|"LEVEL_AT_LEAST"|"HAS_TRAIT", targetId, value}]
+  unlockConditions    String @default("[]")
+  neverUnlockable     Boolean @default(false)
+
+  effects   SkillEffect[]
+}
+
+model SkillEffect {
+  skillId  String
+  skill    Skill            @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  effectId String
+  effect   EffectDefinition @relation(fields: [effectId], references: [id], onDelete: Cascade)
+
+  @@id([skillId, effectId])
+}
+
+model Item {
+  id            String @id @default(cuid())
+  worldId       String
+  world         World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name          String
+  description   String @default("")
+  type          String @default("MISC") // WEAPON | ARMOR | CONSUMABLE | KEY | MISC
+  element       String @default("")
+  statModifiers String @default("{}")
+
+  effects ItemEffect[]
+}
+
+model ItemEffect {
+  itemId   String
+  item     Item             @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  effectId String
+  effect   EffectDefinition @relation(fields: [effectId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, effectId])
+}
+
+model Location {
+  id          String  @id @default(cuid())
+  worldId     String
+  world       World   @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name        String
+  description String  @default("")
+  imageSeed   String  @default("")
+  musicSeed   String  @default("")
+  hidden      Boolean @default(false)
+  isStart     Boolean @default(false)
+  x           Int     @default(0)
+  y           Int     @default(0)
+  // JSON list: [{type:"HAS_ITEM"|"COMPLETED_EVENT"|"HAS_COMPANION", targetId}]
+  unlockConditions String @default("[]")
+  // JSON list of npc ids that can appear here
+  npcPoolIds  String  @default("[]")
+  // JSON list of companion ids recruitable here
+  companionPoolIds String @default("[]")
+
+  dungeons Dungeon[]
+  events   Event[]
+  roadsFrom LocationConnection[] @relation("RoadFrom")
+  roadsTo   LocationConnection[] @relation("RoadTo")
+}
+
+model LocationConnection {
+  id       String   @id @default(cuid())
+  worldId  String
+  world    World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  fromId   String
+  from     Location @relation("RoadFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId     String
+  to       Location @relation("RoadTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId])
+}
+
+model Npc {
+  id             String  @id @default(cuid())
+  worldId        String
+  world          World   @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name           String
+  description    String  @default("")
+  portraitSeed   String  @default("")
+  traitIds       String  @default("[]")
+  skillIds       String  @default("[]")
+  itemIds        String  @default("[]")
+
+  interactions Interaction[]
+}
+
+model Companion {
+  id               String  @id @default(cuid())
+  worldId          String
+  world            World   @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name             String
+  description      String  @default("")
+  portraitSeed     String  @default("")
+  allowedClassIds  String  @default("[]")
+  initialLevel     Int     @default(1)
+  initialSkillIds  String  @default("[]")
+  hiddenSkillIds   String  @default("[]")
+  hideCompanionSkillsByDefault Boolean @default(true)
+
+  interactions Interaction[]
+}
+
+model Interaction {
+  id          String     @id @default(cuid())
+  worldId     String
+  world       World      @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  npcId       String?
+  npc         Npc?       @relation(fields: [npcId], references: [id], onDelete: Cascade)
+  companionId String?
+  companion   Companion? @relation(fields: [companionId], references: [id], onDelete: Cascade)
+  name        String
+  description String     @default("")
+
+  choices InteractionChoice[]
+}
+
+model InteractionChoice {
+  id            String      @id @default(cuid())
+  interactionId String
+  interaction   Interaction @relation(fields: [interactionId], references: [id], onDelete: Cascade)
+  text          String
+  resultText    String      @default("")
+  // JSON list of {effectId, weight} — randomized relationship/effect outcomes
+  outcomes      String      @default("[]")
+}
+
+model Creature {
+  id          String @id @default(cuid())
+  worldId     String
+  world       World  @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name        String
+  description String @default("")
+  portraitSeed String @default("")
+  element     String @default("")
+  stats       String @default("{}")
+  skillIds    String @default("[]")
+  lootItemIds String @default("[]")
+  xpReward    Int    @default(0)
+}
+
+model Dungeon {
+  id          String  @id @default(cuid())
+  worldId     String
+  world       World   @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  locationId  String
+  location    Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  name        String
+  description String  @default("")
+  musicSeed   String  @default("")
+  unlockConditions String @default("[]")
+
+  floors DungeonFloor[]
+}
+
+model DungeonFloor {
+  id           String  @id @default(cuid())
+  dungeonId    String
+  dungeon      Dungeon @relation(fields: [dungeonId], references: [id], onDelete: Cascade)
+  order        Int
+  name         String
+  description  String  @default("")
+  backgroundSeed String @default("")
+  musicSeed    String  @default("")
+  creatureIds  String  @default("[]")
+
+  events Event[]
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  worldId     String
+  world       World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  name        String
+  description String   @default("")
+  imageSeed   String   @default("")
+  musicSeed   String   @default("")
+  category    String   @default("LOCATION") // LOCATION | DUNGEON_FLOOR | GLOBAL
+  locationId  String?
+  location    Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  dungeonFloorId String?
+  dungeonFloor DungeonFloor? @relation(fields: [dungeonFloorId], references: [id], onDelete: Cascade)
+  probability Float    @default(1)
+  // JSON list of event ids that must be completed first
+  prerequisiteEventIds String @default("[]")
+  unlockConditions      String @default("[]")
+
+  choices EventChoice[]
+}
+
+model EventChoice {
+  id         String @id @default(cuid())
+  eventId    String
+  event      Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  text       String
+  resultTextSuccess String @default("")
+  resultTextFailure String @default("")
+  // JSON list of {stat, difficulty} — multiple success stats per choice
+  successStats String @default("[]")
+  // JSON list of {effectId} applied on success
+  successEffectIds String @default("[]")
+  failureEffectIds  String @default("[]")
+  nextEventId String?
+}
+
+// ---------- Playthroughs ----------
+
+model Character {
+  id        String   @id @default(cuid())
+  worldId   String
+  world     World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  gender    String   @default("")
+  raceId    String?
+  classId   String?
+  level     Int      @default(1)
+  xp        Int      @default(0)
+  stats     String   @default("{}")
+  currentLocationId String?
+  timeElapsed Int    @default(0)
+  isAlive   Boolean  @default(true)
+
+  // JSON arrays / maps tracking playthrough state
+  inventory        String @default("[]") // [{itemId, qty}]
+  unlockedSkillIds String @default("[]")
+  traitIds         String @default("[]")
+  knownNpcIds      String @default("[]")
+  companions       String @default("[]") // [{companionId, level, xp, unlockedSkillIds}]
+  unlockedLocationIds String @default("[]")
+  completedEventIds   String @default("[]")
+  flags               String @default("{}")
+  log                 String @default("[]") // recent narrative log entries
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([worldId, userId, name])
+}
