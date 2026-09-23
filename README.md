@@ -15,21 +15,39 @@ different worlds built with the same tools. Four starter worlds are included.
 
 - Next.js 16 (App Router, Server Actions, TypeScript)
 - Tailwind CSS v4
-- Prisma 7 + SQLite (via `@prisma/adapter-better-sqlite3`)
+- Prisma 7 + PostgreSQL (via `@prisma/adapter-pg`) — works with any Postgres,
+  including the free tier of [Prisma Postgres](https://console.prisma.io)
 - Cookie-based sessions (bcrypt-hashed passwords, no third-party auth)
 
-## Getting started
+## Getting started (local)
 
 ```bash
 npm install
-cp .env.example .env
-npm run db:migrate   # applies migrations, creates dev.db
-npm run db:seed      # seeds the 4 starter worlds (idempotent)
+cp .env.example .env   # then set DATABASE_URL to your Postgres connection string
+npm run db:migrate     # applies migrations
+npm run db:seed        # seeds the 4 starter worlds (idempotent)
 npm run dev
 ```
 
 Open http://localhost:3000. Sign up for an account, then browse the starter
 worlds under **Worlds**, or create your own from **New World**.
+
+## Deploying (Vercel + Prisma Postgres, free tier)
+
+1. Create a free database at [console.prisma.io](https://console.prisma.io)
+   (sign in with GitHub → new project → Postgres). Copy the **direct**
+   connection string.
+2. On [vercel.com/new](https://vercel.com/new), import this repo, pick the
+   branch you want live, and add one environment variable:
+   `DATABASE_URL` = the connection string from step 1.
+3. Deploy. The `vercel-build` script (see `package.json`) runs
+   `prisma migrate deploy` and the idempotent seed script automatically on
+   every build, so there is nothing to run by hand — the first deploy creates
+   the schema and the 4 starter worlds, and later deploys are no-ops for both.
+
+`prisma/migrations/` was generated offline (`prisma migrate diff --from-empty
+--to-schema`) against the Postgres provider, so the very first `migrate
+deploy` creates every table from scratch.
 
 ## Project layout
 
